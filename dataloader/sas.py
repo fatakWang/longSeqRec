@@ -23,13 +23,14 @@ class SASDataloader():
         self.umap = dataset['umap']
         self.smap = dataset['smap']
         self.user_count = len(self.umap)
-        self.item_count = len(self.smap)
+        self.item_count = len(self.smap) # 从1开始,1...item_count 为itme id
 
         args.num_users = self.user_count
         args.num_items = self.item_count
         self.max_len = args.bert_max_len
         self.mask_prob = args.bert_mask_prob
         self.sliding_size = args.sliding_window_size
+        # 我们应该没有这个mask token，还需要查明的是我们的itemid 是否从0开始,
         self.CLOZE_MASK_TOKEN = self.item_count + 1
 
     @classmethod
@@ -74,44 +75,63 @@ class SASDataloader():
             dataset = SASTestDataset(self.args, self.train, self.val, self.test, self.max_len, self.rng)
         return dataset
 
-
+# 添加负样本，动态添加，配合滑动窗口,正负样本1：1先把，这样快一些
+# allseq存储的是各个滑动后的产生序列，不需要再额外添加了，应该是maxlen+1的长度
+# 最后一位作为正样本，也就是target_pos_item，然后随机抽一位作为负样本（不在序列也不在正样本里），作为target_neg_item
 class SASTrainDataset(data_utils.Dataset):
     def __init__(self, args, u2seq, max_len, sliding_size, rng):
         self.args = args
-        self.max_len = max_len
+        self.max_len = max_len # 序列长度
         self.sliding_step = int(sliding_size * max_len)
         self.num_items = args.num_items
         self.rng = rng
         
         assert self.sliding_step > 0
         self.all_seqs = []
+        self.pos_item = []
+        self.neg_item = [] # 直接从seq中无放回抽滑动次数个
+        all_item_set = {i for i in range(1,self.item_count+1)} # 所有item的集合,【1-self.item_count】
         for u in sorted(u2seq.keys()):
             seq = u2seq[u]
+            neg_item_pool = all_item_set - set(seq)
             # 序列长度小则，直接加
             if len(seq) < self.max_len + self.sliding_step:
-                self.all_seqs.append(seq)
+                self.all_seqs.append(seq[:-1])
+                self.pos_item.append(seq[-1])
+                self.neg_item.append(random.sample(neg_item_pool,1)) # 在除了seq的item中随机抽一个，也不要是0
             else:
                 # 序列长度大于则拆开，相当于是滑动窗口版本了，start_idx就是起始idx，从最后一个能有max_LEN的到最后一位。
-                start_idx = range(len(seq) - max_len, -1, -self.sliding_step)
+                start_idx = range(len(seq) - max_len -1, -1, -self.sliding_step)
                 # append是加到最后一位，+是将【】解包，然后在逐个append。
                 self.all_seqs = self.all_seqs + [seq[i:i + max_len] for i in start_idx]
+                self.pos_item = self.pos_item + [seq[i+max_len] for i in start_idx]
+                # TODO 有没有可能len(start_idx)大于了neg_item_pool，应该不可能吧
+                self.neg_item = random.sample(neg_item_pool,len(start_idx))
 
     def __len__(self):
         return len(self.all_seqs)
 
     def __getitem__(self, index):
         # index与user解绑了
-        seq = self.all_seqs[index]
+        # 还需要加上0
+        seq = self.all_seqs[index][-self.max_len:]
+        mask_len = self.max_len - len(seq)
+        seq = [0] * mask_len + seq
+        target_pos = self.pos_item[index]
+        target_neg = self.neg_item[index]
+        return torch.LongTensor(seq), torch.LongTensor(target_pos) , torch.LongTensor(target_neg)
+        
         # label比token多一个,多一个最后一个元素
-        labels = seq[-self.max_len:]
-        # [:-1]指的是除掉最后一个，[-self.max_len:]是最后
-        tokens = seq[:-1][-self.max_len:]
-        mask_len = self.max_len - len(tokens)
-        tokens = [0] * mask_len + tokens
-        mask_len = self.max_len - len(labels)
-        labels = [0] * mask_len + labels
-# 
-        return torch.LongTensor(tokens), torch.LongTensor(labels)
+        # labels = seq[-self.max_len:]
+        # # [:-1]指的是除掉最后一个，[-self.max_len:]是最后
+        # tokens = seq[:-1][-self.max_len:]
+        # mask_len = self.max_len - len(tokens)
+        # tokens = [0] * mask_len + tokens
+        # mask_len = self.max_len - len(labels)
+        # labels = [0] * mask_len + labels
+        
+         
+        # return torch.LongTensor(tokens), torch.LongTensor(labels)
 
 
 class SASValidDataset(data_utils.Dataset):
@@ -124,6 +144,11 @@ class SASValidDataset(data_utils.Dataset):
         self.users = [u for u in users if len(u2answer[u]) > 0]
         self.max_len = max_len
         self.rng = rng
+        all_item_set = {i for i in range(1,self.item_count+1)}
+        self.neg_item = {}
+        for u in self.users:
+            neg_item_pool = all_item_set - set(self.u2seq[u]) - set(self.u2answer[u])
+            self.neg_item[u] = random.sample(neg_item_pool,self.args.negative_sample_size)
     
     def __len__(self):
         return len(self.users)
@@ -133,12 +158,13 @@ class SASValidDataset(data_utils.Dataset):
         seq = self.u2seq[user]
         # 倒数第二个item
         answer = self.u2answer[user]
+        
 
         seq = seq[-self.max_len:]
         padding_len = self.max_len - len(seq)
         seq = [0] * padding_len + seq
-# seq直接使用-self.max_len:
-        return torch.LongTensor(seq), torch.LongTensor(answer)
+# seq直接使用-self.max_len:,负样本是从seq整理另外抽
+        return torch.LongTensor(seq), torch.LongTensor(answer), torch.LongTensor(self.neg_item[user])
         
         # cur_idx, negs = 0, []
         # samples = self.rng.randint(1, self.args.num_items+1, size=5*self.args.negative_sample_size)
@@ -168,6 +194,11 @@ class SASTestDataset(data_utils.Dataset):
         self.users = [u for u in users if len(u2val[u]) > 0 and len(u2answer[u]) > 0]
         self.max_len = max_len
         self.rng = rng
+        all_item_set = {i for i in range(1,self.item_count+1)}
+        self.neg_item = {}
+        for u in self.users:
+            neg_item_pool = all_item_set - set(self.u2seq[u]) - set(self.u2answer[u]) -set(self.u2val[u])
+            self.neg_item[u] = random.sample(neg_item_pool,self.args.negative_sample_size)
 
     def __len__(self):
         return len(self.users)
@@ -181,7 +212,7 @@ class SASTestDataset(data_utils.Dataset):
         padding_len = self.max_len - len(seq)
         seq = [0] * padding_len + seq
 # seq是-self.max_len:,包含了val
-        return torch.LongTensor(seq), torch.LongTensor(answer)
+        return torch.LongTensor(seq), torch.LongTensor(answer) , torch.LongTensor(self.neg_item[user])
 
         # cur_idx, negs = 0, []
         # samples = self.rng.randint(1, self.args.num_items+1, size=5*self.args.negative_sample_size)

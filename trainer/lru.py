@@ -36,17 +36,9 @@ class LRUTrainer(BaseTrainer):
         return loss
 
     def calculate_metrics(self, batch):
-        seqs, labels = batch
+        seqs, labels , target_neg = batch
         
-        if self.args.dataset_code != 'xlong':
-            scores = self.model(seqs)[0][:, -1, :]
-            B, L = seqs.shape
-            for i in range(L):
-                scores[torch.arange(scores.size(0)), seqs[:, i]] = -1e9
-            scores[:, 0] = -1e9  # padding
-        else:
-            scores, labels = self.model(seqs, labels=labels)
-            scores = scores[:, -1, :]
+        
         
         metrics = absolute_recall_mrr_ndcg_for_ks(scores, labels.view(-1), self.metric_ks)
         return metrics

@@ -89,7 +89,7 @@ class LRUModel(nn.Module):
             assert labels is not None
             if self.training:
                 num_samples = self.args.negative_sample_size  # 100
-                samples = torch.randint(1, self.args.num_items+1, size=(*x.shape[:2], num_samples,))
+                samples = torch.randint(1, self.args.num_items+1, size=(*x.shape[:2], num_samples,)) # 实时生成的，这样有好也有不好，好的地方在于适合多个epoch，不好的地方在于不方便调整
                 all_items = torch.cat([samples.to(labels.device), labels.unsqueeze(-1)], dim=-1)
                 sampled_embeddings = embedding_weight[all_items]
                 scores = torch.einsum('b l d, b l i d -> b l i', x, sampled_embeddings) + self.bias[all_items]

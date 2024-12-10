@@ -29,6 +29,17 @@ def ndcg(scores, labels, k):
     return ndcg.mean()
 
 
+def get_metric(pred_list, topk=10):
+    NDCG = 0.0
+    Recall = 0.0
+    # [batch] the answer's rank
+    for rank in pred_list:
+        MRR += 1.0 / (rank + 1.0)
+        if rank < topk:
+            NDCG += 1.0 / np.log2(rank + 2.0)
+            Recall += 1.0
+    return Recall /len(pred_list), NDCG /len(pred_list)
+
 def absolute_recall_mrr_ndcg_for_ks(scores, labels, ks):
     metrics = {}
     labels = F.one_hot(labels, num_classes=scores.size(1))

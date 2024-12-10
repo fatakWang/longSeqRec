@@ -6,7 +6,7 @@ from abc import ABCMeta, abstractmethod
 def save_state_dict(state_dict, path, filename):
     torch.save(state_dict, os.path.join(path, filename))
 
-
+#调用 一下介个logger来写入指标/保存模型
 class LoggerService(object):
     def __init__(self, args, writer, val_loggers, test_loggers, use_wandb):
         self.args = args
@@ -42,7 +42,7 @@ class AbstractBaseLogger(metaclass=ABCMeta):
     def complete(self, *args, **kwargs):
         pass
 
-
+# 负责给writer写入指标
 class MetricGraphPrinter(AbstractBaseLogger):
     def __init__(self, key, graph_name, group_name, use_wandb):
         self.key = key
@@ -62,7 +62,7 @@ class MetricGraphPrinter(AbstractBaseLogger):
     def complete(self, writer, *args, **kwargs):
         self.log(writer, *args, **kwargs)
 
-
+# 每一个新的epoch都保存一下权重
 class RecentModelLogger(AbstractBaseLogger):
     def __init__(self, args, checkpoint_path, filename='checkpoint-recent.pth'):
         self.args = args
@@ -85,7 +85,7 @@ class RecentModelLogger(AbstractBaseLogger):
         save_state_dict(kwargs['state_dict'],
                         self.checkpoint_path, self.filename + '.final')
 
-
+# 再best_metric被更新时保存权重，并且patience_counter再不更新时++
 class BestModelLogger(AbstractBaseLogger):
     def __init__(self, args, checkpoint_path, metric_key, filename='best_acc_model.pth'):
         self.args = args

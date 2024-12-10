@@ -1,7 +1,12 @@
-from .lru import LRU
+from .sim import SIM
+from .sim import SIM
+from .sim import SIM
+from .sim import SIM
+from .sim import SIM
+
 
 MODELS = {
-    # todo
+    "DIN": 
     
 }
 
