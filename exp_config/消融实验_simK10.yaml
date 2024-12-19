@@ -1,0 +1,52 @@
+# 数据集相关配置
+dataset_code: ml-1m # ml-1m beauty sports steam video xlong
+min_rating: 0
+min_uc: 5
+min_sc: 5
+split: leave_one_out
+seed: 42
+bert_max_len: 200 # 50-steam 1000-xlong 200-ml 50-other
+
+# 数据加载器相关配置
+train_batch_size: 64 # val/test = train_batch_size*2  32-xlong 64-other
+val_batch_size: 128
+test_batch_size: 128
+num_workers: 0
+sliding_window_size: 1
+negative_sample_size: 100
+
+# 训练器相关配置
+device: cuda
+num_epochs: 500
+optimizer: AdamW
+weight_decay: 0.01
+adam_epsilon: 1.e-9
+momentum: null
+lr: 0.001
+max_grad_norm: 5.0
+enable_lr_schedule: False
+decay_step: 10000
+gamma: 0.1
+enable_lr_warmup: False
+warmup_steps: 100
+
+# evaluation
+val_strategy: epoch # 每隔多少个iter验证一次，而不是每一个epoch验证一次
+val_iterations: 500 # 500-ml 2000-steam/xlong 1000-other
+early_stopping: true
+early_stopping_patience: 5
+metric_ks:
+  - 1
+  - 5
+  - 10
+  - 50
+best_metric: Recall@10
+use_wandb: True
+
+# 模型相关配置
+model_code: SIM # 大写
+K: 10 #search数量，din最近K个
+hidden_size: 64 # 模型embedding的维度
+gsu_embd_hidden_size: 16 # sim：gsu维度 ，eta：gsu中hash的bit数，设置成10比较合适，sdim：hash的bit数，din/twin中没用到
+num_heads: 4 # head的个数，sdim是hash桶数
+desc: "simK10"
