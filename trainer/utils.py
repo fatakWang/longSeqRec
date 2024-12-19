@@ -34,7 +34,6 @@ def get_metric(pred_list, topk=10):
     Recall = 0.0
     # [batch] the answer's rank
     for rank in pred_list:
-        MRR += 1.0 / (rank + 1.0)
         if rank < topk:
             NDCG += 1.0 / np.log2(rank + 2.0)
             Recall += 1.0

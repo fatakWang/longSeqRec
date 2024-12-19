@@ -1,7 +1,6 @@
 from .base import *
 import torch
 import torch.nn as nn
-from modules import Encoder, LayerNorm, QueryKeywordsEncoder
 import numpy as np
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -11,8 +10,17 @@ class SIM(BaseSearchBasedModel):
         super().__init__(args)
         self.esu_embeddings = nn.Embedding(args.item_size, args.hidden_size, padding_idx=0)
         self.gsu_embeddings = nn.Embedding(args.item_size, args.gsu_embd_hidden_size, padding_idx=0)
-        self.gsu_merged_out_alignment_layer = nn.Linear(args.gsu_embd_hidden_size,args.hidden_size)
+        self.gsu_prediction_deep_layer = nn.Sequential(
+            nn.Linear(2 * args.gsu_embd_hidden_size, args.gsu_embd_hidden_size),
+            nn.ReLU(),
+            nn.Linear(args.gsu_embd_hidden_size, 1),
+        )
         del self.item_embeddings
+        
+    def gsu_prediction_layer(self,sequence_emb,target_emb):
+        final_prediction_embd = torch.cat([sequence_emb,target_emb], dim=-1)
+        logit = self.gsu_prediction_deep_layer(final_prediction_embd)
+        return logit
         
         
     def item_embed_layer(self,input_sequence_ids,target_item_id):
@@ -51,13 +59,11 @@ class SIM(BaseSearchBasedModel):
         """
         gsu_embd , esu_embd , target_item_gsu_embd , target_item_esu_embd = self.item_embed_layer(user_sequence_id,target_item_id)
         
-        pos_relative_gsu_out_topk , pos_gsu_merged= self.stageone_softsearch(gsu_seq_embd , target_item_gsu_embd)
-        esu_output_pos, _ = self.stagetwo_embdfusion(pos_relative_gsu_out_topk ,esu_seq_embd ,  target_item_esu_embd)
+        pos_relative_gsu_out_topk , pos_gsu_merged= self.stageone_softsearch(gsu_embd , target_item_gsu_embd)
+        esu_output_pos, _ = self.stagetwo_embdfusion(pos_relative_gsu_out_topk ,esu_embd ,  target_item_esu_embd)
         # torch.squeeze可以干掉张量中所有维度为1的shape
-        logit_pos_esu = self.prediction_layer(esu_output_pos ,torch.squeeze(target_item_emb) )
-        # [B,args.gsu_embd_hidden_size] -> [B,hidden_size]
-        pos_gsu_merged = self.gsu_merged_out_alignment_layer(pos_gsu_merged)
-        logit_pos_gsu_merged = self.prediction_layer(pos_gsu_merged ,torch.squeeze(target_item_emb) )
+        logit_pos_esu = self.prediction_layer(esu_output_pos ,torch.squeeze(target_item_esu_embd) )
+        logit_pos_gsu_merged = self.gsu_prediction_layer(pos_gsu_merged ,torch.squeeze(target_item_gsu_embd) )
         
         return logit_pos_esu , logit_pos_gsu_merged
         
@@ -86,5 +92,4 @@ class SIM(BaseSearchBasedModel):
         gsu_out_merge = torch.bmm(torch.transpose(user_seq_emb, 1, 2), torch.unsqueeze(qK, dim=-1)).squeeze()
 
         return indices, gsu_out_merge
-        
         

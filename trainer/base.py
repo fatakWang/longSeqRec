@@ -45,7 +45,7 @@ class BaseTrainer():
         if use_wandb:
             import wandb
             wandb.init(
-                name=self.args.model_code+'_'+self.args.dataset_code,
+                name=self.args.model_code+'_'+self.args.dataset_code+'_'+self.args.desc,
                 project=PROJECT_NAME,
                 config=args,
             )
@@ -75,7 +75,7 @@ class BaseTrainer():
             if self.exit_training:
                 print('Early stopping triggered. Exit training')
                 break
-        self.logger_service.complete()
+        # self.logger_service.complete()
 # 计算loss，并且把这一epoch每一个iter的loss平均值记录在 tqdm上，并且定期调用vaild监测是否停止训练
     def train_one_epoch(self, epoch, accum_iter):
         average_meter_set = AverageMeterSet()
@@ -135,7 +135,7 @@ class BaseTrainer():
         # 与vaild的区别就是load了best_model_dict
         self.model.load_state_dict(best_model_dict)
         self.model.eval()
-
+        
         average_meter_set = AverageMeterSet()
         with torch.no_grad():
             tqdm_dataloader = tqdm(self.test_loader)
@@ -163,6 +163,8 @@ class BaseTrainer():
             print(average_metrics)
             with open(os.path.join(self.export_root, 'test_metrics.json'), 'w') as f:
                 json.dump(average_metrics, f, indent=4)
+                
+            self.logger_service.complete()
         
         return average_metrics
     
@@ -190,11 +192,8 @@ class BaseTrainer():
         # [B,L] , [B,1] ,[B,1]
         seqs, labels ,target_neg  = batch
         pos_esu_logit, logits_neg_group, pos_gsu_logit, logits_neg_gsu_merged_group = self.model.get_logit_pos_neg(seqs,labels ,target_neg)
-        if self.args.no_gsu_loss
-            loss_gsu = self.cross_entropy_next_item_loss(logits_stage1_pos, logits_stage1_neg)
-        else:
-            loss_gsu = 0
-        loss_esu = self.cross_entropy_next_item_loss(logits_pos, logits_neg_group)
+        loss_gsu = self.cross_entropy_next_item_loss(pos_gsu_logit, logits_neg_gsu_merged_group)
+        loss_esu = self.cross_entropy_next_item_loss(pos_esu_logit, logits_neg_group)
         loss = loss_gsu + loss_esu
         
         return loss
@@ -207,10 +206,10 @@ class BaseTrainer():
         Recall_50, NDCG_50 = get_metric(pred_list, 50)
 
         post_fix = {
-            "Recall@1": '{:.4f}'.format(Recall_1), "NDCG@1": '{:.4f}'.format(NDCG_1),
-            "Recall@5": '{:.4f}'.format(Recall_5), "NDCG@5": '{:.4f}'.format(NDCG_5),
-            "Recall@10": '{:.4f}'.format(Recall_10), "NDCG@10": '{:.4f}'.format(NDCG_10),
-            "Recall@50": '{:.4f}'.format(Recall_50), "NDCG@50": '{:.4f}'.format(NDCG_50)
+            "Recall@1": Recall_1, "NDCG@1": NDCG_1,
+            "Recall@5": Recall_5, "NDCG@5": NDCG_5,
+            "Recall@10": Recall_10, "NDCG@10": NDCG_10,
+            "Recall@50": Recall_50, "NDCG@50": NDCG_50
         }
        
         return post_fix

@@ -3,7 +3,8 @@
 *.pt
 *.pth
 .DS_Store
-
+/wandb/*
 /.ipynb_checkpoints/*
 /.vscode/*
 /experiments/*
+/.idea/*

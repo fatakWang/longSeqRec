@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from modules import Encoder, LayerNorm, QueryKeywordsEncoder
 import numpy as np
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -21,10 +20,10 @@ class BaseSearchBasedModel(nn.Module):
             nn.Linear(args.hidden_size, 1),
         )
         
-        self.wQ_list = [nn.Linear(args.hidden_size, args.hidden_size) for _ in range(self.args.num_heads)]
-        self.wK_list = [nn.Linear(args.hidden_size, args.hidden_size) for _ in range(self.args.num_heads)]
-        self.wV_list = [nn.Linear(args.hidden_size, args.hidden_size) for _ in range(self.args.num_heads)]
-        self.wO = nn.Linear(self.num_heads * args.hidden_size, args.hidden_size)
+        self.wQ_list = [nn.Linear(args.hidden_size, args.hidden_size).to(self.args.device) for _ in range(self.args.num_heads)]
+        self.wK_list = [nn.Linear(args.hidden_size, args.hidden_size).to(self.args.device) for _ in range(self.args.num_heads)]
+        self.wV_list = [nn.Linear(args.hidden_size, args.hidden_size).to(self.args.device) for _ in range(self.args.num_heads)]
+        self.wO = nn.Linear(self.args.num_heads * args.hidden_size, args.hidden_size)
         
         
         
@@ -82,10 +81,10 @@ class BaseSearchBasedModel(nn.Module):
         # 交给子类去实现
         raise NotImplementedError
         
-    def stagetwo_embdfusion(self,gsu_out_topk,user_seq_emb ,target_emb):
+    def stagetwo_embdfusion(self,indices,user_seq_emb ,target_emb):
         """
             input:
-                gsu_out_topk: [B, K]
+                indices: [B, K]
                 user_seq_emb: [B, L, D] 
                 target_emb: [B, 1, D]
 
@@ -97,6 +96,7 @@ class BaseSearchBasedModel(nn.Module):
                 将sequence_emb融合为一个定长的embedding
         """
         # gather_index [B,K,D]
+        emb_dim = user_seq_emb.shape[-1]
         gather_index = indices.unsqueeze(-1).expand(-1, -1, emb_dim).to(dtype=torch.int64) 
         # user_seq_emb -> gsu_out_topk: [B, L, D] -> [B, K, D]
         # gsu_out_topk[i][j][k] = user_seq_emb_mask[i][gather_index[i][j][k]][k]
@@ -104,7 +104,6 @@ class BaseSearchBasedModel(nn.Module):
         
         num_heads = self.args.num_heads
         head_list = []
-        emb_dim = sequence_emb.shape[-1]
 
         attention_mask_list = []
         for i in range(num_heads):

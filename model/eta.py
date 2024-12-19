@@ -1,7 +1,6 @@
 from .base import *
 import torch
 import torch.nn as nn
-from modules import Encoder, LayerNorm, QueryKeywordsEncoder
 import numpy as np
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -10,34 +9,36 @@ class ETA(BaseSearchBasedModel):
     def __init__(self, args):
         super().__init__(args)
         self.hash_bits = args.gsu_embd_hidden_size
-        self.hash_proj_matrix = nn.Linear(args.hidden_size, self.hash_bits)
-        # freeze hash proj matrix after initialization
-        for param in self.hash_proj_matrix.parameters():
-            param.requires_grad = False
-            
+        self.hash_proj_matrix = torch.randn(self.args.hidden_size, self.hash_bits, device=self.args.device)
+        self.hash_proj_matrix.requires_grad = False 
+        
+    # 只有训练会用
     def hash_emb_layer(self, inputs):
         """
             inputs:  dense embedding of [B, ..., D]
             inputs_proj_hash: int (0/1) embedding of [B, ..., N_Bits], larger distance means similar vectors
         """
-        # [B, ..., D] -> [B, ..., N_bits]
-        inputs_proj = self.hash_proj_matrix(inputs)
-        inputs_proj = torch.unsqueeze(inputs_proj, dim = -1) # [B, N_Bit] -> [B, N_Bit, 1]
-        inputs_proj_merge = torch.cat([-1.0 * inputs_proj, inputs_proj], axis=-1)  # [B, N_Bit, 1] -> [B, N_Bit, 2]
-        # 一种转为0、1的方法
-        inputs_proj_hash = torch.argmax(inputs_proj_merge, dim=-1)
-        return inputs_proj_hash
-
+        hash_scores = torch.matmul(inputs, self.hash_proj_matrix)
+        hash_values = torch.sign(hash_scores)
+        hash_values = (hash_values + 1) / 2
+        hash_values = hash_values.type(torch.uint8)
+        
+        return hash_values
+        
+    # 测试中只有它
     def hamming_distance(self, query_hashes, keys_hashes):
         """
             query_hashes: [B, 1, N_Bits]
             keys_hashes: [B, L, N_Bits]
             distance: [B, L]
         """
-        key_num = keys_hashes.shape[1]
-        # [B, 1, N] -> [B, L, N]
-        query_hashes_tile = query_hashes.repeat((1, key_num, 1))
-        match_buckets = torch.eq(query_hashes_tile, keys_hashes).int()
+        
+        # key_num = keys_hashes.shape[1]
+        # # [B, 1, N] -> [B, L, N]
+        # query_hashes_tile = query_hashes.repeat((1, key_num, 1))
+        # match_buckets = torch.eq(query_hashes_tile, keys_hashes).int()
+        # distance = torch.sum(match_buckets, dim=-1)
+        match_buckets = torch.bitwise_xor(query_hashes,keys_hashes)
         distance = torch.sum(match_buckets, dim=-1)
         return distance
     
@@ -62,10 +63,22 @@ class ETA(BaseSearchBasedModel):
         qk_hamming_distance = self.hamming_distance(query_hashes, keys_hashes)
 
         # values: [B, K], indices: [B, K]
-        values, indices = torch.topk(qk_hamming_distance, K, dim=-1, largest=True)
+        values, indices = torch.topk(qk_hamming_distance, self.args.K, dim=-1,largest=False)
         
         return indices,None
-        
+    
+    def sim_search(self,user_seq_emb,target_emb):
+        # 用target_emb与user_seq_emb做内积search出前K个
+        qK = torch.squeeze(torch.bmm(user_seq_emb, torch.transpose(target_emb, 1, 2)))   # [B,L,D] \times [B, D, 1] -> [B, L, 1] -> [B, L]
+        # values: [B, K], indices: [B, K]，他不怕会选出0么
+        # TODO 后续需要确保不会search出padding item
+        values, indices = torch.topk(qK, self.args.K, dim=-1, largest=True)
+
+        ## SIM merge, [B, L, D], [B, L, 1] -> [B, D] ， gsu_out_merge并没有QKv的过程也没有scaled,相当于qk内积后直接得到的是重要度然后与原序列emb相乘，得到融合后的结果
+        # 这个矩阵相乘的过程相当于加权求和
+        gsu_out_merge = torch.bmm(torch.transpose(user_seq_emb, 1, 2), torch.unsqueeze(qK, dim=-1)).squeeze()
+
+        return indices, gsu_out_merge
     
     
     def item_id2logit(self,user_sequence_id,target_item_id):
@@ -81,7 +94,7 @@ class ETA(BaseSearchBasedModel):
             功能：
                 将id转为embedding,并拼接sequence_emb与target_emb
         """
-        user_seq_embd , _ , target_item_embd = self.item_embed_layer(user_sequence_id,target_item_id)
+        user_seq_embd , _ , target_item_emb = self.item_embed_layer(user_sequence_id,target_item_id)
         
         pos_relative_gsu_out_topk , _ = self.stageone_softsearch(user_seq_embd , target_item_emb)
         esu_output_pos, _ = self.stagetwo_embdfusion(pos_relative_gsu_out_topk ,user_seq_embd ,  target_item_emb)
@@ -89,4 +102,13 @@ class ETA(BaseSearchBasedModel):
         logit_pos_esu = self.prediction_layer(esu_output_pos ,torch.squeeze(target_item_emb) )
         
         return logit_pos_esu , None
+    
+    def test_search(self,user_sequence_id,target_item_id):
+        # 测试通过，没什么问题
+        user_seq_embd , _ , target_item_emb = self.item_embed_layer(user_sequence_id,target_item_id)
+        
+        indices_simhash , _ = self.stageone_softsearch(user_seq_embd , target_item_emb)
+        indices_inner,_ = self.sim_search(user_seq_embd , target_item_emb)
+        print(f"{indices_simhash - indices_inner}")
+        
     

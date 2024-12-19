@@ -1,7 +1,6 @@
 from .base import *
 import torch
 import torch.nn as nn
-from modules import Encoder, LayerNorm, QueryKeywordsEncoder
 import numpy as np
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -18,7 +17,7 @@ class DIN(BaseSearchBasedModel):
         
         num_heads = self.args.num_heads
         head_list = []
-        emb_dim = sequence_emb.shape[-1]
+        emb_dim = user_seq_emb.shape[-1]
 
         attention_mask_list = []
         for i in range(num_heads):

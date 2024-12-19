@@ -1,7 +1,6 @@
 from .base import *
 import torch
 import torch.nn as nn
-from modules import Encoder, LayerNorm, QueryKeywordsEncoder
 import numpy as np
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -27,7 +26,7 @@ class TWIN(BaseSearchBasedModel):
         user_sequence_emb , _ , target_item_emb = self.item_embed_layer(user_sequence_id,target_item_id)
         
         gsu_output_topK_emb_list , _= self.stageone_softsearch(user_sequence_emb , target_item_emb)
-        esu_output_pos, _ = self.stagetwo_embdfusion(gsu_output_topK_emb_list ,  target_item_emb)
+        esu_output_pos, _ = self.multi_head_target_attention(gsu_output_topK_emb_list ,  target_item_emb)
         # torch.squeeze可以干掉张量中所有维度为1的shape
         logit_pos_esu = self.prediction_layer(esu_output_pos ,torch.squeeze(target_item_emb) )
         # logit_pos_gsu_merged = self.prediction_layer(pos_gsu_merged ,torch.squeeze(target_item_emb) )
@@ -68,10 +67,8 @@ class TWIN(BaseSearchBasedModel):
             values, indices = torch.topk(qK, self.args.K, dim=-1, largest=True)
             # user_seq_emb: [B, L, D], index= [B, index_length=K]
             gather_index = indices.unsqueeze(-1).expand(-1, -1, emb_dim).to(dtype=torch.int64)
-            # Applies Attention Mask, PADDING Token [PAD] Embedding to 0
-            user_seq_emb_mask = torch.mul(user_seq_emb, attention_mask.unsqueeze(-1).repeat((1, 1, emb_dim)))
             # user_seq_emb [B, L, D] -> [B, K, D]
-            gather_topk_emb = torch.gather(user_seq_emb_mask, dim=1, index=gather_index, out=None)
+            gather_topk_emb = torch.gather(user_seq_emb, dim=1, index=gather_index, out=None)
             gsu_output_topK_emb_list.append(gather_topk_emb)
         return gsu_output_topK_emb_list, None
     
