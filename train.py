@@ -10,7 +10,7 @@ from trainer import *
 
 
 def train(args, export_root=None):
-    # seed_everything(args.seed)
+    seed_everything(args.seed)
     if export_root == None:
         export_root = EXPERIMENT_ROOT + '/' + args.model_code + '/' + args.dataset_code + '/' + args.desc
 

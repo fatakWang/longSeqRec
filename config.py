@@ -15,6 +15,15 @@ OPTIMIZER_STATE_DICT_KEY = 'optimizer_state_dict'
 
 PROJECT_NAME = 'RUC_Grad_Design'
 
+def seed_everything(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    
+
 class DynamicClass:
     def __init__(self, input_dict):
         for key, value in input_dict.items():
